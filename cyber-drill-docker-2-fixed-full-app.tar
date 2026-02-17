@@ -1,0 +1,83 @@
+
+# Fix for MySQL Initialization and API Connection
+echo "Checking MySQL database setup..."
+sudo systemctl start mysql
+if [ $? -ne 0 ]; then
+    echo "ERROR: MySQL failed to start!" >&2
+    exit 1
+fi
+
+# Ensure the config table is created and seeded
+mysql -u root -p$MYSQL_ROOT_PASSWORD << EOF
+USE app_db;
+CREATE TABLE IF NOT EXISTS config (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    key_name VARCHAR(255) NOT NULL,
+    value TEXT NOT NULL
+);
+INSERT INTO config (key_name, value) VALUES ('jwt_secret', 'your_secret_key') ON DUPLICATE KEY UPDATE value='your_secret_key';
+EOF
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to initialize or seed database!" >&2
+    exit 1
+else
+    echo "MySQL database initialized and config table created."
+fi
+
+# Fix for Web Login (Session and Credentials)
+echo "Fixing Web Login and Session Handling..."
+# Ensure PHP sessions are working
+echo "session.save_path = '/var/lib/php/sessions'" | sudo tee -a /etc/php/7.4/apache2/php.ini
+
+# Ensure credentials validation against the database
+mysql -u root -p$MYSQL_ROOT_PASSWORD -e "SELECT * FROM users WHERE username='admin' AND password='Admin@123';"
+if [ $? -ne 0 ]; then
+    echo "ERROR: Invalid login credentials or user not found!" >&2
+    exit 1
+else
+    echo "Login credentials validated."
+fi
+
+# Check for Apache and PHP setup
+echo "Checking Apache and PHP Setup..."
+sudo systemctl start apache2
+if [ $? -ne 0 ]; then
+    echo "ERROR: Apache failed to start!" >&2
+    exit 1
+else
+    echo "Apache started successfully."
+fi
+
+# Ensure PHP is correctly configured and running
+php -v > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "ERROR: PHP is not installed or configured correctly!" >&2
+    exit 1
+else
+    echo "PHP is installed and configured."
+fi
+
+# Check if PHP mod is enabled and functional
+sudo systemctl restart apache2
+if [ $? -ne 0 ]; then
+    echo "ERROR: Apache failed to restart with PHP!" >&2
+    exit 1
+else
+    echo "Apache and PHP are working properly."
+fi
+
+# Final check
+echo "Performing final health check for all services..."
+sudo systemctl status apache2 | grep "active (running)" > /dev/null
+if [ $? -ne 0 ]; then
+    echo "ERROR: Apache is not running!" >&2
+    exit 1
+fi
+
+sudo systemctl status mysql | grep "active (running)" > /dev/null
+if [ $? -ne 0 ]; then
+    echo "ERROR: MySQL is not running!" >&2
+    exit 1
+fi
+
+echo "All services are up and running successfully."
